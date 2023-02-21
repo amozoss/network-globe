@@ -1,8 +1,11 @@
 package main
 
 import (
+	"errors"
+	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
 	"time"
 
@@ -17,30 +20,26 @@ var (
 	snapshotLen int32  = 1024
 	promiscuous bool   = false
 	err         error
-	timeout     time.Duration = -1 * time.Second
+	timeout     time.Duration = 1 * time.Second
 	handle      *pcap.Handle
-
-	//34.150.199.48 -> 192.168.86.26
-	//map[continent:map[code:NA geoname_id:6255149 names:map[de:Nordamerika en:North America es:Norteamérica fr:Amérique du Nord ja:北アメリカ pt-BR:América do Norte ru:Северная Америка zh-CN:北美洲]]
-	// country:map[geoname_id:6252001 iso_code:US names:map[de:USA en:United States es:Estados Unidos fr:États-Unis ja:アメリカ合衆国 pt-BR:Estados Unidos ru:США zh-CN:美国]]
-	// location:map[accuracy_radius:1000 latitude:37.751 longitude:-97.822 time_zone:America/Chicago]
-	// registered_country:map[geoname_id:6252001 iso_code:US names:map[de:USA en:United States es:Estados Unidos fr:États-Unis ja:アメリカ合衆国 pt-BR:Estados Unidos ru:США zh-CN:美国]]]
-	record struct {
-		Country struct {
-			ISOCode string `maxminddb:"iso_code"`
-			Names   struct {
-				En string `maxminddb:"en"`
-			} `maxminddb:"names"`
-		} `maxminddb:"country"`
-		Location struct {
-			ISOCode   int     `maxminddb:"accuracy_radius"`
-			Latitude  float64 `maxminddb:"latitude"`
-			Longitude float64 `maxminddb:"longitude"`
-		} `maxminddb:"location"`
-	}
 )
 
 func main() {
+	frontendDir := flag.String("frontend-dir", "public", "static files directory")
+	hostname := flag.String("host", "127.0.0.1", "name of the host")
+	port := flag.Int("port", 8000, "port")
+	flag.Parse()
+
+	server := NewServer(*frontendDir)
+
+	go func() {
+		log.Printf("Listening on %s:%d\n", *hostname, *port)
+		log.Fatal(http.ListenAndServe(fmt.Sprintf("%s:%d", *hostname, *port), server))
+	}()
+	go func() {
+		server.StartBroadcasts()
+	}()
+
 	db, err := maxminddb.Open("./GeoLite2-City.mmdb")
 	if err != nil {
 		log.Fatal(err)
@@ -60,17 +59,48 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println("Only capturing TCP packets.")
 
+	fmt.Println("Only capturing TCP packets.")
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	for packet := range packetSource.Packets() {
 		//printPacketInfo(packet)
 		//printPacketInfo2(packet)
-		ipToCoord(db, packet)
+		ip, _, rec, err := ipToCoord(db, packet)
+		if err != nil {
+			//log.Println(err)
+			continue
+		}
+		if ip != nil && rec != nil {
+			msg := fmt.Sprintf("%15s -> %-15s %20s %f,%f\n", ip.SrcIP, ip.DstIP, rec.Country.Names.En, rec.Location.Latitude, rec.Location.Longitude)
+			log.Println(msg)
+			server.Queue(&Message{
+				Src:  LatLng{39.781932, -104.970578},
+				Dst:  LatLng{rec.Location.Latitude, rec.Location.Longitude},
+				Name: rec.Country.Names.En,
+			})
+		}
 	}
 }
 
-func ipToCoord(db *maxminddb.Reader, packet gopacket.Packet) {
+// map[continent:map[code:NA geoname_id:6255149 names:map[de:Nordamerika en:North America es:Norteamérica fr:Amérique du Nord ja:北アメリカ pt-BR:América do Norte ru:Северная Америка zh-CN:北美洲]]
+//  country:map[geoname_id:6252001 iso_code:US names:map[de:USA en:United States es:Estados Unidos fr:États-Unis ja:アメリカ合衆国 pt-BR:Estados Unidos ru:США zh-CN:美国]]
+//  location:map[accuracy_radius:1000 latitude:37.751 longitude:-97.822 time_zone:America/Chicago]
+//  registered_country:map[geoname_id:6252001 iso_code:US names:map[de:USA en:United States es:Estados Unidos fr:États-Unis ja:アメリカ合衆国 pt-BR:Estados Unidos ru:США zh-CN:美国]]]
+type record struct {
+	Country struct {
+		ISOCode string `maxminddb:"iso_code"`
+		Names   struct {
+			En string `maxminddb:"en"`
+		} `maxminddb:"names"`
+	} `maxminddb:"country"`
+	Location struct {
+		ISOCode   int     `maxminddb:"accuracy_radius"`
+		Latitude  float64 `maxminddb:"latitude"`
+		Longitude float64 `maxminddb:"longitude"`
+	} `maxminddb:"location"`
+}
+
+func ipToCoord(db *maxminddb.Reader, packet gopacket.Packet) (ip *layers.IPv4, tcp *layers.TCP, rec *record, err error) {
 	ipLayer := packet.Layer(layers.LayerTypeIPv4)
 	if ipLayer != nil {
 		ip, _ := ipLayer.(*layers.IPv4)
@@ -78,16 +108,24 @@ func ipToCoord(db *maxminddb.Reader, packet gopacket.Packet) {
 		if tcpLayer != nil {
 			tcp, _ := tcpLayer.(*layers.TCP)
 			if tcp.SYN && tcp.ACK {
-				err = db.Lookup(ip.SrcIP, &record)
+				err = db.Lookup(ip.SrcIP, &rec)
 				if err != nil {
 					log.Fatal(err)
 				}
-				//fmt.Printf("%15s -> %-15s %s\n", ip.SrcIP, ip.DstIP, record.Country.ISOCode)
-				fmt.Printf("%15s -> %-15s %v\n", ip.SrcIP, ip.DstIP, record)
+				return ip, tcp, rec, nil
 			}
 		}
 	}
+	return nil, nil, nil, errors.New("not found")
+}
 
+func printIpToCoord(db *maxminddb.Reader, packet gopacket.Packet) {
+	ip, _, record, err := ipToCoord(db, packet)
+	if err != nil {
+		return
+	}
+	//fmt.Printf("%15s -> %-15s %s\n", ip.SrcIP, ip.DstIP, record.Country.ISOCode)
+	fmt.Printf("%15s -> %-15s %20s %f,%f\n", ip.SrcIP, ip.DstIP, record.Country.Names.En, record.Location.Latitude, record.Location.Longitude)
 }
 
 func printPacketInfo2(packet gopacket.Packet) {

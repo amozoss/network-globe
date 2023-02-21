@@ -1,0 +1,157 @@
+<head>
+  <style>
+    body {
+      margin: 0;
+    }
+  </style>
+
+  <script src="//unpkg.com/react/umd/react.production.min.js"></script>
+  <script src="//unpkg.com/react-dom/umd/react-dom.production.min.js"></script>
+  <script src="//unpkg.com/@babel/standalone"></script>
+
+  <script src="//unpkg.com/d3-dsv"></script>
+  <script src="//unpkg.com/index-array-by"></script>
+
+  <script src="//unpkg.com/react-globe.gl"></script>
+  <!--<script src="../../dist/react-globe.gl.js"></script>-->
+</head>
+
+<body>
+  <div id="globeViz"></div>
+
+  <script type="text/jsx">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    var myWebSocket;
+    function connectToWS(onMessage) {
+      if (myWebSocket !== undefined) {
+        myWebSocket.close();
+      }
+
+      myWebSocket = new WebSocket("ws://" + window.location.host + "/ws");
+
+      myWebSocket.onmessage = onMessage
+
+      myWebSocket.onopen = function (evt) {
+        console.log("onopen.");
+        sendMsg("HI!");
+      };
+
+      myWebSocket.onclose = function (evt) {
+        // TODO handle disconnects and reconnections
+        //      Usually easier to just use socket.io
+        console.log("onclose.");
+      };
+
+      myWebSocket.onerror = function (evt) {
+        console.log("Error!");
+      };
+    }
+
+    function sendMsg(message) {
+      //var message = document.getElementById("myMessage").value;
+      myWebSocket.send(message);
+    }
+
+    function closeConn() {
+      myWebSocket.close();
+    }
+
+    const COUNTRY = 'United States';
+    const OPACITY = 0.50;
+    const FLIGHT_TIME = 3000;
+    const WEIRD_MULTIPLE = 1.4;
+
+    const World = () => {
+      const globeEl = useRef();
+      const [points, setPoints] = useState([]);
+      const [routes, setRoutes] = useState([]);
+      const [rings, setRings] = useState([]);
+      const onUpload = () => {
+        sendMsg("Upload")
+      }
+      const onMessage = useCallback((event) => {
+        let msg = JSON.parse(event.data)
+        console.log(event.data)
+        console.log(msg.src, msg.dst, msg.name)
+        if (msg.messages.length > 50) {
+          let msgClone = structuredClone(msg.messages)
+          let msgClone2 = structuredClone(msg.messages)
+          setRoutes((oldRoutes) => [...msg.messages])
+          setTimeout(() => {
+            setRings([...msgClone2])
+            setPoints((oldPoints) => [...oldPoints, ...msgClone])
+            setTimeout(() => {
+              setRings([])
+              sendMsg("Done")
+            }, FLIGHT_TIME * WEIRD_MULTIPLE);
+          }, FLIGHT_TIME);
+
+          setTimeout(() => {
+            setRoutes([])
+          }, FLIGHT_TIME * WEIRD_MULTIPLE);
+        }
+      }, [setRoutes])
+
+      useEffect(() => {
+        // aim at continental US centroid
+        globeEl.current.pointOfView({ lat: 39.6, lng: -55.338, altitude: 2 });
+        connectToWS(onMessage);
+      }, []);
+      console.log(routes)
+
+      return (
+      <div>
+      {/*
+        <button onClick={onUpload} style={{
+        position: "absolute",
+        top: 16,
+        left: 16,
+        zIndex: 10,
+        backgroundColor: "white",
+        color: "black",
+        border: "2px solid #555555",
+        }}>Upload</button>
+        */}
+        <Globe
+          ref={globeEl}
+          globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
+
+          arcsData={routes}
+          arcLabel={d => d.name}
+          arcStartLat={d => +d.src.lat}
+          arcStartLng={d => +d.src.lng}
+          arcEndLat={d => +d.dst.lat}
+          arcEndLng={d => +d.dst.lng}
+          arcColor={(d) => d.color}
+          arcDashLength={0.4}
+          arcDashGap={2}
+          arcDashInitialGap={1}
+          arcDashAnimateTime={FLIGHT_TIME}
+          arcsTransitionDuration={0}
+
+          pointsData={points}
+          pointColor={(d) => d.color}
+          pointAltitude={0}
+          pointRadius={.20}
+          pointLat={(d) => +d.dst.lat}
+          pointLng={(d) => +d.dst.lng}
+
+          ringsData={rings}
+          ringColor={(d) => d.color}
+          ringLat={(d) => +d.dst.lat}
+          ringLng={(d) => +d.dst.lng}
+          ringMaxRadius={3}
+          ringPropagationSpeed={1}
+          ringRepeatPeriod={FLIGHT_TIME * WEIRD_MULTIPLE}
+        />
+      </div>);
+    };
+       // arcColor={d => [`rgba(0, 255, 0, ${OPACITY})`, `rgba(255, 0, 0, ${OPACITY})`]}
+
+    ReactDOM.render(
+      <World />,
+      document.getElementById('globeViz')
+    );
+  </script>
+</body>
