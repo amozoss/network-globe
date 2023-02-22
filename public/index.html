@@ -34,7 +34,7 @@
 
       myWebSocket.onopen = function (evt) {
         console.log("onopen.");
-        sendMsg("HI!");
+        sendMsg("start");
       };
 
       myWebSocket.onclose = function (evt) {
@@ -49,7 +49,6 @@
     }
 
     function sendMsg(message) {
-      //var message = document.getElementById("myMessage").value;
       myWebSocket.send(message);
     }
 
@@ -57,8 +56,6 @@
       myWebSocket.close();
     }
 
-    const COUNTRY = 'United States';
-    const OPACITY = 0.50;
     const FLIGHT_TIME = 3000;
     const WEIRD_MULTIPLE = 1.4;
 
@@ -67,53 +64,45 @@
       const [points, setPoints] = useState([]);
       const [routes, setRoutes] = useState([]);
       const [rings, setRings] = useState([]);
-      const onUpload = () => {
-        sendMsg("Upload")
+      const clear = () => {
+         setRings([])
+         setRoutes([])
+         setPoints([])
       }
       const onMessage = useCallback((event) => {
         let msg = JSON.parse(event.data)
-        console.log(event.data)
-        console.log(msg.src, msg.dst, msg.name)
         if (msg.messages.length > 50) {
-          let msgClone = structuredClone(msg.messages)
-          let msgClone2 = structuredClone(msg.messages)
-          setRoutes((oldRoutes) => [...msg.messages])
+          console.log("onMessage")
+          setRoutes((oldRoutes) => [...structuredClone(msg.messages)])
           setTimeout(() => {
-            setRings([...msgClone2])
-            setPoints((oldPoints) => [...oldPoints, ...msgClone])
+            setRings([...structuredClone(msg.messages)])
+            setPoints((oldPoints) => [...oldPoints, ...structuredClone(msg.messages)])
             setTimeout(() => {
               setRings([])
-              sendMsg("Done")
+              sendMsg("routes_done")
             }, FLIGHT_TIME * WEIRD_MULTIPLE);
           }, FLIGHT_TIME);
 
           setTimeout(() => {
             setRoutes([])
+            if (points.length > 4000) {
+              clear()
+            }
           }, FLIGHT_TIME * WEIRD_MULTIPLE);
         }
       }, [setRoutes])
 
       useEffect(() => {
         // aim at continental US centroid
-        globeEl.current.pointOfView({ lat: 39.6, lng: -55.338, altitude: 2 });
+        globeEl.current.pointOfView({ lat: 39.6, lng: -5.338, altitude: 2 });
+
+        // Auto-rotate
+        globeEl.current.controls().autoRotate = true;
+        globeEl.current.controls().autoRotateSpeed = 0.35;
         connectToWS(onMessage);
       }, []);
-      console.log(routes)
 
-      return (
-      <div>
-      {/*
-        <button onClick={onUpload} style={{
-        position: "absolute",
-        top: 16,
-        left: 16,
-        zIndex: 10,
-        backgroundColor: "white",
-        color: "black",
-        border: "2px solid #555555",
-        }}>Upload</button>
-        */}
-        <Globe
+      return (<Globe
           ref={globeEl}
           globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
 
@@ -145,9 +134,8 @@
           ringPropagationSpeed={1}
           ringRepeatPeriod={FLIGHT_TIME * WEIRD_MULTIPLE}
         />
-      </div>);
+      );
     };
-       // arcColor={d => [`rgba(0, 255, 0, ${OPACITY})`, `rgba(255, 0, 0, ${OPACITY})`]}
 
     ReactDOM.render(
       <World />,

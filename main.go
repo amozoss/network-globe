@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 	"github.com/oschwald/maxminddb-golang"
+	"storj.io/uplink"
 )
 
 var (
@@ -26,11 +28,24 @@ var (
 
 func main() {
 	frontendDir := flag.String("frontend-dir", "public", "static files directory")
-	hostname := flag.String("host", "127.0.0.1", "name of the host")
+	hostname := flag.String("host", "0.0.0.0", "name of the host")
 	port := flag.Int("port", 8000, "port")
+	accessGrant := flag.String("access-grant", "", "access grant for storj")
 	flag.Parse()
 
-	server := NewServer(*frontendDir)
+	ctx := context.Background()
+	access, err := uplink.ParseAccess(*accessGrant)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	project, err := uplink.OpenProject(ctx, access)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer project.Close()
+	project.EnsureBucket(ctx, "files")
+
+	server := NewServer(*frontendDir, project)
 
 	go func() {
 		log.Printf("Listening on %s:%d\n", *hostname, *port)
@@ -71,8 +86,8 @@ func main() {
 			continue
 		}
 		if ip != nil && rec != nil {
-			msg := fmt.Sprintf("%15s -> %-15s %20s %f,%f\n", ip.SrcIP, ip.DstIP, rec.Country.Names.En, rec.Location.Latitude, rec.Location.Longitude)
-			log.Println(msg)
+			//msg := fmt.Sprintf("%15s -> %-15s %20s %f,%f\n", ip.SrcIP, ip.DstIP, rec.Country.Names.En, rec.Location.Latitude, rec.Location.Longitude)
+			//log.Println(msg)
 			server.Queue(&Message{
 				Src:  LatLng{39.781932, -104.970578},
 				Dst:  LatLng{rec.Location.Latitude, rec.Location.Longitude},

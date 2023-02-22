@@ -1,13 +1,21 @@
 package main
 
 import (
+	"context"
+	"io"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	"storj.io/uplink"
+)
+
+const (
+	batchSize = 50
 )
 
 var (
@@ -21,25 +29,65 @@ var (
 		"pink",
 		"#00BFFF", // sky blue
 		"#C19A6B", // desert
+		"#800020", // Burgundy
+		"#CC5500", // Burnt orange
+		"#BD33A4", // Byzantine
+		"#702963", // Byzantium
+		"#5F9EA0", // Cadet blue
+		"#91A3B0", // Cadet grey
+		"#006B3C", // Cadmium green
+		"#ED872D", // Cadmium orange
+		"#A67B5B", // Café au lait
+		"#4B3621", // Café noir
+		"#A3C1AD", // Cambridge blue
+		"#C19A6B", // Camel
+		"#EFBBCC", // Cameo pink
+		"#FFFF99", // Canary
+		"#FFEF00", // Canary yellow
+		"#E4717A", // Candy pink
+		"#C41E3A", // Cardinal
+		"#960018", // Carmine
+		"#D70040", // Carmine (M&P)
+		"#FFA6C9", // Carnation pink
+		"#B31B1B", // Carnelian
+		"#56A0D3", // Carolina blue
+		"#ED9121", // Carrot orange
+		"#703642", // Catawba
+		"#C95A49", // Cedar Chest
+		"#ACE1AF", // Celadon
+		"#B2FFFF", // Celeste
+		"#DE3163", // Cerise
+		"#007BA7", // Cerulean
+		"#2A52BE", // Cerulean blue
+		"#6D9BC3", // Cerulean frost
+		"#1DACD6", // Cerulean (Crayola)
 	}
-	updateInterval time.Duration = 1 * time.Second
+	uploadInterval time.Duration = 6 * time.Second
 )
 
 type Server struct {
-	mux        *mux.Router
-	socketMu   sync.Mutex
-	sockets    []*websocket.Conn
-	messages   []*Message
-	messageMu  sync.Mutex
-	colorIndex int
-	ticker     *time.Ticker
+	mux *mux.Router
+
+	socketMu sync.Mutex
+	sockets  []*websocket.Conn
+	// end socketMu
+
+	serverMu     sync.Mutex
+	shouldUpload bool
+	messages     []*Message
+	colorIndex   int
+	// end serverMu
+
+	uploadTicker *time.Ticker
+	project      *uplink.Project
 }
 
-func NewServer(frontendDir string) *Server {
+func NewServer(frontendDir string, project *uplink.Project) *Server {
 	server := &Server{
-		mux:        mux.NewRouter(),
-		colorIndex: 0,
-		ticker:     time.NewTicker(updateInterval),
+		mux:          mux.NewRouter(),
+		colorIndex:   0,
+		uploadTicker: time.NewTicker(uploadInterval),
+		project:      project,
 	}
 	server.mux.HandleFunc("/ws", server.socketHandler)
 	server.mux.PathPrefix("/").Handler(http.FileServer(http.Dir(frontendDir)))
@@ -69,10 +117,44 @@ type BatchMessage struct {
 func (s *Server) StartBroadcasts() {
 	for {
 		select {
-		case <-s.ticker.C:
-			s.Broadcast()
+		case <-s.uploadTicker.C:
+			s.uplinkUpload()
 		}
 	}
+}
+
+func (s *Server) setShouldUpload(upload bool) {
+	s.serverMu.Lock()
+	defer s.serverMu.Unlock()
+	s.shouldUpload = upload
+}
+
+func (s *Server) uplinkUpload() {
+	ctx := context.TODO()
+
+	upload, err := s.project.UploadObject(ctx, "files", "test.txt", &uplink.UploadOptions{
+		Expires: time.Now().Add(1 * time.Hour),
+	})
+	if err != nil {
+		log.Println("UploadObject error:", err)
+	}
+
+	f, err := os.Open("./test.txt")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	_, err = io.Copy(upload, f)
+	if err != nil {
+		log.Println("UploadObject io.Copy error:", err)
+	}
+
+	err = upload.Commit()
+	if err != nil {
+		log.Println("upload.Commit error:", err)
+	}
+	s.setShouldUpload(false)
+	s.Broadcast()
 }
 
 func (s *Server) socketHandler(w http.ResponseWriter, r *http.Request) {
@@ -98,6 +180,12 @@ func (s *Server) socketHandler(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		log.Printf("Received: %s", message)
+		if string(message) == "start" {
+			s.setShouldUpload(true)
+		}
+		if string(message) == "routes_done" {
+			s.setShouldUpload(true)
+		}
 		/*
 			err = conn.WriteMessage(websocket.TextMessage, []byte("HI"))
 			if err != nil {
@@ -108,8 +196,8 @@ func (s *Server) socketHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) Queue(msg *Message) {
-	s.messageMu.Lock()
-	defer s.messageMu.Unlock()
+	s.serverMu.Lock()
+	defer s.serverMu.Unlock()
 	msg.Color = colors[s.colorIndex%(len(colors)-1)]
 
 	s.messages = append(s.messages, msg)
@@ -117,18 +205,14 @@ func (s *Server) Queue(msg *Message) {
 
 // broadcasts to all sockets
 func (s *Server) Broadcast() {
-	// Hacky way to build a new list of open sockets, assuming if it fails to write, it's not open.
-	openSockets := make([]*websocket.Conn, 0)
 
 	var messages []*Message
-	s.messageMu.Lock()
+	s.serverMu.Lock()
 	messages = s.messages
 	s.messages = nil
-	s.messageMu.Unlock()
-	log.Println("len(s.messages)", len(s.messages))
-	log.Println("len(messages)", len(messages))
+	s.serverMu.Unlock()
 
-	if len(messages) < 50 {
+	if len(messages) < 50 || len(s.sockets) < 1 {
 		return
 	}
 
@@ -136,8 +220,10 @@ func (s *Server) Broadcast() {
 		Messages: messages,
 	}
 
+	// Hacky way to build a new list of open sockets, assuming if it fails to write, it's not open.
+	openSockets := make([]*websocket.Conn, 0)
+	log.Println("Broadcasting")
 	for _, conn := range s.sockets {
-		log.Printf("Broadcasting: %v", msg)
 
 		err := conn.WriteJSON(msg)
 		if err != nil {
@@ -151,9 +237,9 @@ func (s *Server) Broadcast() {
 	s.sockets = openSockets
 	s.socketMu.Unlock()
 
-	s.messageMu.Lock()
+	s.serverMu.Lock()
 	s.colorIndex++
-	s.messageMu.Unlock()
+	s.serverMu.Unlock()
 }
 
 func (s *Server) cleanup(id string) {
