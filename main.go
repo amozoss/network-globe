@@ -18,9 +18,8 @@ import (
 )
 
 var (
-	device      string = "en5"
-	snapshotLen int32  = 1024
-	promiscuous bool   = false
+	snapshotLen int32 = 1024
+	promiscuous bool  = false
 	err         error
 	timeout     time.Duration = 1 * time.Second
 	handle      *pcap.Handle
@@ -31,7 +30,14 @@ func main() {
 	hostname := flag.String("host", "0.0.0.0", "name of the host")
 	port := flag.Int("port", 8000, "port")
 	accessGrant := flag.String("access-grant", "", "access grant for storj")
+	listDevices := flag.Bool("list-devices", false, "list devices")
+	device := flag.String("device", "eth0", "list devices")
 	flag.Parse()
+
+	if *listDevices {
+		printDevices()
+		return
+	}
 
 	ctx := context.Background()
 	access, err := uplink.ParseAccess(*accessGrant)
@@ -62,7 +68,7 @@ func main() {
 	defer db.Close()
 
 	// Open device
-	handle, err = pcap.OpenLive(device, snapshotLen, promiscuous, timeout)
+	handle, err = pcap.OpenLive(*device, snapshotLen, promiscuous, timeout)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -132,6 +138,25 @@ func ipToCoord(db *maxminddb.Reader, packet gopacket.Packet) (ip *layers.IPv4, t
 		}
 	}
 	return nil, nil, nil, errors.New("not found")
+}
+
+func printDevices() {
+	devices, err := pcap.FindAllDevs()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Print device information
+	fmt.Println("Devices found:")
+	for _, device := range devices {
+		fmt.Println("\nName: ", device.Name)
+		fmt.Println("Description: ", device.Description)
+		fmt.Println("Devices addresses: ", device.Description)
+		for _, address := range device.Addresses {
+			fmt.Println("- IP address: ", address.IP)
+			fmt.Println("- Subnet mask: ", address.Netmask)
+		}
+	}
 }
 
 func printIpToCoord(db *maxminddb.Reader, packet gopacket.Packet) {
