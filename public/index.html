@@ -118,10 +118,11 @@
           arcDashInitialGap={1}
           arcDashAnimateTime={FLIGHT_TIME}
           arcsTransitionDuration={0}
+          arcStroke={0.8}
 
           pointsData={points}
           pointColor={(d) => d.color}
-          pointAltitude={0}
+          pointAltitude={0.05}
           pointRadius={.20}
           pointLat={(d) => +d.dst.lat}
           pointLng={(d) => +d.dst.lng}
@@ -138,7 +139,10 @@
     };
 
     ReactDOM.render(
-      <World />,
+      <div>
+        <img src="/storj-logo.png" style={{position: "absolute", left: 16, top: 16, zIndex: 10, width: "30vw"}} />
+        <World />
+      </div>,
       document.getElementById('globeViz')
     );
   </script>

@@ -19,48 +19,16 @@ const (
 )
 
 var (
-	colors []string = []string{"#FFC680", // buff
-		"red",
-		"orange",
-		"#FF1493", // Deep pink
-		"white",
-		"purple",
-		"yellow",
-		"pink",
-		"#00BFFF", // sky blue
-		"#C19A6B", // desert
-		"#800020", // Burgundy
-		"#CC5500", // Burnt orange
-		"#BD33A4", // Byzantine
-		"#702963", // Byzantium
-		"#5F9EA0", // Cadet blue
-		"#91A3B0", // Cadet grey
-		"#006B3C", // Cadmium green
-		"#ED872D", // Cadmium orange
-		"#A67B5B", // Café au lait
-		"#4B3621", // Café noir
-		"#A3C1AD", // Cambridge blue
-		"#C19A6B", // Camel
-		"#EFBBCC", // Cameo pink
-		"#FFFF99", // Canary
-		"#FFEF00", // Canary yellow
-		"#E4717A", // Candy pink
-		"#C41E3A", // Cardinal
-		"#960018", // Carmine
-		"#D70040", // Carmine (M&P)
-		"#FFA6C9", // Carnation pink
-		"#B31B1B", // Carnelian
-		"#56A0D3", // Carolina blue
-		"#ED9121", // Carrot orange
-		"#703642", // Catawba
-		"#C95A49", // Cedar Chest
-		"#ACE1AF", // Celadon
-		"#B2FFFF", // Celeste
-		"#DE3163", // Cerise
-		"#007BA7", // Cerulean
-		"#2A52BE", // Cerulean blue
-		"#6D9BC3", // Cerulean frost
-		"#1DACD6", // Cerulean (Crayola)
+	colors []string = []string{
+		"#00E366DD",
+		"#FF458BDD",
+		"#FFC600DD",
+		"#FFFFFFDD",
+		"#0149FFDD",
+		"#9B4FFFDD",
+		"#00BFEADD",
+		"#FF7E2EDD",
+		"#EBEEF1DD",
 	}
 	uploadInterval time.Duration = 6 * time.Second
 )
