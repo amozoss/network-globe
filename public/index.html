@@ -5,113 +5,247 @@
     }
   </style>
 
-  <script src="//unpkg.com/react/umd/react.production.min.js"></script>
-  <script src="//unpkg.com/react-dom/umd/react-dom.production.min.js"></script>
-  <script src="//unpkg.com/@babel/standalone"></script>
+  <script
+    src="//unpkg.com/react@latest/umd/react.development.js"
+    crossorigin="anonymous"
+  ></script>
+  <script src="https://unpkg.com/react-dom@latest/umd/react-dom.development.js"></script>
+  <script
+    src="//unpkg.com/@mui/material@latest/umd/material-ui.development.js"
+    crossorigin="anonymous"
+  ></script>
+  <script
+    src="//unpkg.com/@babel/standalone@latest/babel.min.js"
+    crossorigin="anonymous"
+  ></script>
+  <!-- Fonts to support Material Design -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap"
+  />
+  <!-- Icons to support Material Design -->
+  <link
+    rel="stylesheet"
+    href="https://fonts.googleapis.com/icon?family=Material+Icons"
+  />
 
   <script src="//unpkg.com/d3-dsv"></script>
   <script src="//unpkg.com/index-array-by"></script>
 
   <script src="//unpkg.com/react-globe.gl"></script>
-  <!--<script src="../../dist/react-globe.gl.js"></script>-->
+  <script></script>
 </head>
 
 <body>
   <div id="globeViz"></div>
-
   <script type="text/jsx">
-    const { useState, useEffect, useRef, useCallback } = React;
+    const reconnectInterval = 5000; // 5 seconds
+    const { useState, useEffect, useRef, useCallback } = React
+    const { createRoot } = ReactDOM
+    const { Fab, SvgIcon, Button, Dialog, ListItemText, ListItem, List, Divider, AppBar, Toolbar, IconButton, Typography, Switch, Slide } = MaterialUI;
 
-    var myWebSocket;
-    function connectToWS(onMessage) {
-      if (myWebSocket !== undefined) {
-        myWebSocket.close();
+    const Transition = React.forwardRef(function Transition(props, ref) {
+      return <Slide direction="up" ref={ref} {...props} />;
+    });
+
+    function Settings({ open, handleClose, rotate, setRotate, showUploads, setShowUploads, showDownloads, setShowDownloads}) {
+      function CloseIcon(props) {
+        return (
+          <SvgIcon {...props}>
+          <path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path>
+          </SvgIcon>
+        );
       }
 
-      myWebSocket = new WebSocket("ws://" + window.location.host + "/ws");
+      return (
+        <Dialog
+          fullScreen
+          open={open}
+          onClose={handleClose}
+          TransitionComponent={Transition}
+        >
+          <AppBar sx={{ position: 'relative' }}>
+            <Toolbar>
+              <IconButton
+                edge="start"
+                color="inherit"
+                onClick={handleClose}
+                aria-label="close"
+              >
+                <CloseIcon />
+              </IconButton>
+              <Typography sx={{ ml: 2, flex: 1 }} variant="h6" component="div">
+                Settings
+              </Typography>
+              <Button autoFocus color="inherit" onClick={handleClose}>
+                Done
+              </Button>
+            </Toolbar>
+          </AppBar>
+          <List>
+            <ListItem button onClick={() => setRotate(!rotate)}>
+              <ListItemText primary="Auto Rotate Globe" />
+              <Switch color="primary" checked={rotate} />
+            </ListItem>
+            <Divider />
+            <ListItem button onClick={() => setShowUploads(!showUploads) }>
+              <ListItemText primary="Show uploads" />
+              <Switch color="primary" checked={showUploads} />
+            </ListItem>
+            <Divider />
+            <ListItem button onClick={() => setShowDownloads(!showDownloads) }>
+              <ListItemText primary="Show downloads" />
+              <Switch color="primary" checked={showDownloads} />
+            </ListItem>
+            <Divider />
+          </List>
+        </Dialog>
+      );
+    }
+
+    var myWebSocket
+    function connectToWS(onMessage) {
+      if (myWebSocket !== undefined) {
+        myWebSocket.close()
+      }
+
+      myWebSocket = new WebSocket('ws://' + window.location.host + '/ws')
 
       myWebSocket.onmessage = onMessage
 
       myWebSocket.onopen = function (evt) {
-        console.log("onopen.");
-        sendMsg("start");
-      };
+        console.log('onopen.')
+        sendMsg('start')
+      }
 
       myWebSocket.onclose = function (evt) {
-        // TODO handle disconnects and reconnections
-        //      Usually easier to just use socket.io
-        console.log("onclose.");
-      };
+        console.log('WebSocket connection closed, attempting to reconnect');
+        setTimeout(() => connectToWS(onMessage), reconnectInterval);
+      }
 
       myWebSocket.onerror = function (evt) {
-        console.log("Error!");
-      };
+        console.log('Error!')
+      }
     }
 
     function sendMsg(message) {
-      myWebSocket.send(message);
+      myWebSocket.send(message)
     }
 
     function closeConn() {
-      myWebSocket.close();
+      myWebSocket.close()
     }
 
-    const FLIGHT_TIME = 3000;
-    const WEIRD_MULTIPLE = 1.4;
+    const FLIGHT_TIME = 3000
+    const WEIRD_MULTIPLE = 1.4
 
-    const World = () => {
-      const globeEl = useRef();
-      const [points, setPoints] = useState([]);
-      const [routes, setRoutes] = useState([]);
-      const [rings, setRings] = useState([]);
+    const World = ({open, setOpen}) => {
+      const globeEl = useRef()
+      const [points, setPoints] = useState([])
+      const [routes, setRoutes] = useState([])
+      const [rings, setRings] = useState([])
+      const [rotate, setRotate] = useState(false);
+      const [showUploads, setShowUploads] = useState(true);
+      const [showDownloads, setShowDownloads] = useState(false);
+      // I dunno chatgpt told me use a ref, surely there's a better way
+      // but the websocket has a closure to the callback, so maybe not
+      const showUploadsRef = useRef(showUploads);
+      const showDownloadsRef = useRef(showDownloads);
+
+      useEffect(() => {
+        showUploadsRef.current = showUploads;
+      }, [showUploads]);
+
+      useEffect(() => {
+        showDownloadsRef.current = showDownloads;
+      }, [showDownloads]);
+
       const clear = () => {
-         setRings([])
-         setRoutes([])
-         setPoints([])
+        setRings([])
+        setRoutes([])
+        setPoints([])
       }
-      const onMessage = useCallback((event) => {
-        let msg = JSON.parse(event.data)
-        if (msg.messages.length > 50) {
-          console.log("onMessage")
-          setRoutes((oldRoutes) => [...structuredClone(msg.messages)])
+      const onMessage = useCallback(
+        (event) => {
+          let msg = JSON.parse(event.data)
+          console.log(msg)
+          let filtered = msg.messages
+          if (!filtered || filtered.length === 0) {
+            return
+          }
+          if (showUploadsRef.current && !showDownloadsRef.current) {
+            filtered = filtered.filter((m) => m.direction !== 'Download')
+          }
+          if (showDownloadsRef.current && !showUploadsRef.current) {
+            filtered = filtered.filter((m) => m.direction !== 'Upload')
+          }
+          if (!showDownloadsRef.current && !showUploadsRef.current) {
+            filtered = []
+          }
+          setRoutes((oldRoutes) => [...structuredClone(filtered), ...oldRoutes])
           setTimeout(() => {
-            setRings([...structuredClone(msg.messages)])
-            setPoints((oldPoints) => [...oldPoints, ...structuredClone(msg.messages)])
+            setRings([...structuredClone(filtered)])
+            setPoints((oldPoints) => {
+              oldPoints = oldPoints.filter((p) => !filtered.some((f) => f.dst.lat === p.dst.lat && f.dst.lng === p.dst.lng))
+
+              return [
+                ...oldPoints,
+                ...structuredClone(filtered),
+              ]
+            })
             setTimeout(() => {
               setRings([])
-              sendMsg("routes_done")
-            }, FLIGHT_TIME * WEIRD_MULTIPLE);
-          }, FLIGHT_TIME);
+              //sendMsg('routes_done')
+            }, FLIGHT_TIME * WEIRD_MULTIPLE)
+          }, FLIGHT_TIME)
 
           setTimeout(() => {
             setRoutes([])
             if (points.length > 4000) {
               clear()
             }
-          }, FLIGHT_TIME * WEIRD_MULTIPLE);
-        }
-      }, [setRoutes])
+          }, FLIGHT_TIME * WEIRD_MULTIPLE)
+        },
+        [setRoutes, setPoints, setRings]
+      )
+      useEffect(() => {
+        globeEl.current.controls().autoRotate = rotate;
+      }, [rotate])
 
       useEffect(() => {
         // aim at continental US centroid
-        globeEl.current.pointOfView({ lat: 39.6, lng: -5.338, altitude: 2 });
+        globeEl.current.pointOfView({ lat: 39.6, lng: -5.338, altitude: 2 })
 
-        // Auto-rotate
-        globeEl.current.controls().autoRotate = true;
-        globeEl.current.controls().autoRotateSpeed = 0.35;
-        connectToWS(onMessage);
-      }, []);
+        globeEl.current.controls().autoRotateSpeed = 0.45
+        connectToWS(onMessage)
+      }, [])
 
-      return (<Globe
+      return (
+      <div>
+        <Settings
+          open={open}
+          handleClose={() => setOpen(false)}
+          showUploads={showUploads}
+          setShowUploads={setShowUploads}
+          showDownloads={showDownloads}
+          setShowDownloads={setShowDownloads}
+          rotate={rotate}
+          setRotate={(rot) => {
+            globeEl.current.controls().autoRotate = rot;
+            setRotate(rot);
+          }}
+        />
+        <Globe
           ref={globeEl}
           globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
-
           arcsData={routes}
-          arcLabel={d => d.name}
-          arcStartLat={d => +d.src.lat}
-          arcStartLng={d => +d.src.lng}
-          arcEndLat={d => +d.dst.lat}
-          arcEndLng={d => +d.dst.lng}
+          arcLabel={(d) => `${d.name} (${d.count})`}
+          arcStartLat={(d) => +d.src.lat}
+          arcStartLng={(d) => +d.src.lng}
+          arcEndLat={(d) => +d.dst.lat}
+          arcEndLng={(d) => +d.dst.lng}
           arcColor={(d) => d.color}
           arcDashLength={0.4}
           arcDashGap={2}
@@ -119,14 +253,13 @@
           arcDashAnimateTime={FLIGHT_TIME}
           arcsTransitionDuration={0}
           arcStroke={0.8}
-
           pointsData={points}
+          pointLabel={(d) => `${d.name} (${d.count})`}
           pointColor={(d) => d.color}
           pointAltitude={0.05}
-          pointRadius={.20}
+          pointRadius={0.2}
           pointLat={(d) => +d.dst.lat}
           pointLng={(d) => +d.dst.lng}
-
           ringsData={rings}
           ringColor={(d) => d.color}
           ringLat={(d) => +d.dst.lat}
@@ -135,15 +268,46 @@
           ringPropagationSpeed={1}
           ringRepeatPeriod={FLIGHT_TIME * WEIRD_MULTIPLE}
         />
-      );
-    };
+        </div>
+      )
+    }
 
-    ReactDOM.render(
-      <div>
-        <img src="/storj-logo.png" style={{position: "absolute", left: 16, top: 16, zIndex: 10, width: "30vw"}} />
-        <World />
-      </div>,
-      document.getElementById('globeViz')
-    );
+    function SettingsIcon(props) {
+      return (
+        <SvgIcon {...props}>
+          <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6"></path>
+        </SvgIcon>
+      );
+    }
+
+    function App() {
+      const [open, setOpen] = useState(false);
+        return (
+          <div>
+            <img
+              src="/storj-logo.png"
+              style={{
+                position: 'absolute',
+                left: 16,
+                top: 16,
+                zIndex: 10,
+                width: '30vw',
+              }}
+            />
+            <World open={open} setOpen={setOpen} />
+            <Fab
+              sx={{ position: 'absolute', bottom: 25, right: 25 }}
+              color="primary"
+              aria-label="add"
+              onClick={() => setOpen(true)}
+            >
+              <SettingsIcon />
+            </Fab>
+          </div>
+        )
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('globeViz'))
+    root.render(<App />)
   </script>
 </body>

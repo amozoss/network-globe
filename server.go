@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"embed"
+	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
-	"os"
 	"sync"
 	"time"
 
@@ -14,23 +18,21 @@ import (
 	"storj.io/uplink"
 )
 
-const (
-	batchSize = 50
-)
-
 var (
 	colors []string = []string{
-		"#00E366DD",
-		"#FF458BDD",
-		"#FFC600DD",
-		"#FFFFFFDD",
-		"#0149FFDD",
-		"#9B4FFFDD",
-		"#00BFEADD",
-		"#FF7E2EDD",
-		"#EBEEF1DD",
+		"#00E366",
+		"#FF458B",
+		"#FFC600",
+		"#FFFFFF",
+		"#0149FF",
+		"#9B4FFF",
+		"#00BFEA",
+		"#FF7E2E",
+		"#EBEEF1",
 	}
 	uploadInterval time.Duration = 6 * time.Second
+	//go:embed public/*
+	files embed.FS
 )
 
 type Server struct {
@@ -40,25 +42,46 @@ type Server struct {
 	sockets  []*websocket.Conn
 	// end socketMu
 
-	serverMu     sync.Mutex
-	shouldUpload bool
-	messages     []*Message
-	colorIndex   int
+	serverMu           sync.Mutex
+	shouldUpload       bool
+	messages           []*Message
+	srcDestPacketCount map[string]int64
+	queuedForFrontend  map[string]bool
+	colorIndex         int
 	// end serverMu
 
 	uploadTicker *time.Ticker
 	project      *uplink.Project
+	bucket       string
+	batchSize    int
+	debug        bool
 }
 
-func NewServer(frontendDir string, project *uplink.Project) *Server {
+func NewServer(frontendDir string, project *uplink.Project, bucket string, batchSize int, debug bool) *Server {
 	server := &Server{
-		mux:          mux.NewRouter(),
-		colorIndex:   0,
-		uploadTicker: time.NewTicker(uploadInterval),
-		project:      project,
+		mux:                mux.NewRouter(),
+		colorIndex:         0,
+		uploadTicker:       time.NewTicker(uploadInterval),
+		project:            project,
+		bucket:             bucket,
+		debug:              debug,
+		srcDestPacketCount: make(map[string]int64),
+		queuedForFrontend:  make(map[string]bool),
 	}
 	server.mux.HandleFunc("/ws", server.socketHandler)
-	server.mux.PathPrefix("/").Handler(http.FileServer(http.Dir(frontendDir)))
+	var dir http.FileSystem
+
+	if frontendDir == "" {
+		fsys, err := fs.Sub(files, "frontend")
+		if err != nil {
+			panic(err)
+		}
+		dir = http.FS(fsys)
+	} else {
+		dir = http.Dir(frontendDir)
+	}
+
+	server.mux.PathPrefix("/").Handler(http.FileServer(dir))
 	go func() {
 	}()
 	return server
@@ -72,10 +95,12 @@ type LatLng struct {
 }
 
 type Message struct {
-	Src   LatLng `json:"src"`
-	Dst   LatLng `json:"dst"`
-	Name  string `json:"name"`
-	Color string `json:"color"`
+	Src       LatLng `json:"src"`
+	Dst       LatLng `json:"dst"`
+	Direction string `json:"direction"`
+	Count     int    `json:"count"`
+	Name      string `json:"name"`
+	Color     string `json:"color"`
 }
 
 type BatchMessage struct {
@@ -86,7 +111,10 @@ func (s *Server) StartBroadcasts() {
 	for {
 		select {
 		case <-s.uploadTicker.C:
-			s.uplinkUpload()
+			if s.project != nil {
+				s.uplinkUpload()
+			}
+			s.Broadcast()
 		}
 	}
 }
@@ -99,20 +127,28 @@ func (s *Server) setShouldUpload(upload bool) {
 
 func (s *Server) uplinkUpload() {
 	ctx := context.TODO()
+	if s.debug {
+		log.Println("upload started")
+	}
 
-	upload, err := s.project.UploadObject(ctx, "files", "test.txt", &uplink.UploadOptions{
+	upload, err := s.project.UploadObject(ctx, s.bucket, "test.txt", &uplink.UploadOptions{
 		Expires: time.Now().Add(1 * time.Hour),
 	})
 	if err != nil {
 		log.Println("UploadObject error:", err)
 	}
 
-	f, err := os.Open("./test.txt")
+	// random bytes to test upload
+	buffer := make([]byte, 8024)
+	_, err = rand.Read(buffer)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to generate random bytes: %v", err)
 	}
 
-	_, err = io.Copy(upload, f)
+	// Create a bytes.Reader from the buffer
+	randomBytes := bytes.NewReader(buffer)
+
+	_, err = io.Copy(upload, randomBytes)
 	if err != nil {
 		log.Println("UploadObject io.Copy error:", err)
 	}
@@ -121,13 +157,22 @@ func (s *Server) uplinkUpload() {
 	if err != nil {
 		log.Println("upload.Commit error:", err)
 	}
+	if s.debug {
+		log.Println("upload finished")
+	}
 	s.setShouldUpload(false)
 	s.Broadcast()
 }
 
 func (s *Server) socketHandler(w http.ResponseWriter, r *http.Request) {
 	// Upgrade our raw HTTP connection to a websocket based one
-	var upgrader = websocket.Upgrader{}
+	var upgrader = websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			// Check the origin here and return true if it's valid
+			// For example, allow all origins:
+			return true
+		},
+	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -148,27 +193,30 @@ func (s *Server) socketHandler(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		log.Printf("Received: %s", message)
-		if string(message) == "start" {
+		msg := string(message)
+		if msg == "start" {
 			s.setShouldUpload(true)
 		}
-		if string(message) == "routes_done" {
+		if msg == "routes_done" {
 			s.setShouldUpload(true)
 		}
-		/*
-			err = conn.WriteMessage(websocket.TextMessage, []byte("HI"))
-			if err != nil {
-				log.Println("Error during message writing:", err)
-			}
-		*/
 	}
 }
 
 func (s *Server) Queue(msg *Message) {
+
 	s.serverMu.Lock()
 	defer s.serverMu.Unlock()
-	msg.Color = colors[s.colorIndex%(len(colors)-1)]
+	srcKey := fmt.Sprintf("%f,%f:%f,%f", msg.Src.Lat, msg.Src.Lng, msg.Dst.Lat, msg.Dst.Lng)
+	s.srcDestPacketCount[srcKey] += 1
 
-	s.messages = append(s.messages, msg)
+	msg.Color = colors[s.colorIndex%(len(colors)-1)]
+	msg.Count = int(s.srcDestPacketCount[srcKey])
+
+	if !s.queuedForFrontend[srcKey] {
+		s.messages = append(s.messages, msg)
+	}
+	s.queuedForFrontend[srcKey] = true
 }
 
 // broadcasts to all sockets
@@ -178,9 +226,14 @@ func (s *Server) Broadcast() {
 	s.serverMu.Lock()
 	messages = s.messages
 	s.messages = nil
+	s.queuedForFrontend = make(map[string]bool)
 	s.serverMu.Unlock()
 
-	if len(messages) < 50 || len(s.sockets) < 1 {
+	//for latLng, value := range s.srcDestPacketCount {
+	//	fmt.Printf("%s: %d\n", latLng, value)
+	//}
+
+	if len(messages) < s.batchSize || len(s.sockets) < 1 {
 		return
 	}
 
@@ -190,7 +243,6 @@ func (s *Server) Broadcast() {
 
 	// Hacky way to build a new list of open sockets, assuming if it fails to write, it's not open.
 	openSockets := make([]*websocket.Conn, 0)
-	log.Println("Broadcasting")
 	for _, conn := range s.sockets {
 
 		err := conn.WriteJSON(msg)
