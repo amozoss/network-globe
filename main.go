@@ -44,7 +44,7 @@ func main() {
 	// TODO Should be with a format flag and all messages should be in json
 	isJson := flag.Bool("json", false, "output device list in json")
 
-	batchSize := flag.Int("batch-size", 5, "number of detected connections to batch send to frontend")
+	batchSize := flag.Int("batch-size", 1, "number of detected connections to batch send to frontend")
 	srcLat := flag.Float64("lat", 39.781932, "src lat - where lines start")
 	srcLng := flag.Float64("lng", -104.970578, "src lng - where lines start")
 	device := flag.String("device", "en0", "list devices")

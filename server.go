@@ -35,6 +35,15 @@ var (
 	files embed.FS
 )
 
+type embedFileSystem struct {
+	http.FileSystem
+}
+
+func (e embedFileSystem) Open(name string) (http.File, error) {
+	fmt.Printf("Opening file: %s\n", name) // Add logging for debugging
+	return e.FileSystem.Open(name)
+}
+
 type Server struct {
 	mux *mux.Router
 
@@ -70,13 +79,12 @@ func NewServer(frontendDir string, project *uplink.Project, bucket string, batch
 	}
 	server.mux.HandleFunc("/ws", server.socketHandler)
 	var dir http.FileSystem
-
 	if frontendDir == "" {
-		fsys, err := fs.Sub(files, "frontend")
+		fsys, err := fs.Sub(files, "public")
 		if err != nil {
 			panic(err)
 		}
-		dir = http.FS(fsys)
+		dir = embedFileSystem{http.FS(fsys)}
 	} else {
 		dir = http.Dir(frontendDir)
 	}

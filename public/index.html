@@ -148,7 +148,7 @@
       const [rings, setRings] = useState([])
       const [rotate, setRotate] = useState(false);
       const [showUploads, setShowUploads] = useState(true);
-      const [showDownloads, setShowDownloads] = useState(false);
+      const [showDownloads, setShowDownloads] = useState(true);
       // I dunno chatgpt told me use a ref, surely there's a better way
       // but the websocket has a closure to the callback, so maybe not
       const showUploadsRef = useRef(showUploads);

@@ -29,29 +29,24 @@ See a [demo](https://demo.storj.dev)
 #### Ubuntu
 
 ```bash
-sudo apt install libpcap-dev
-# TODO
+sudo apt install libpcap-dev zip
+wget https://github.com/amozoss/network-globe/releases/latest/download/network-globe_linux_amd64.zip
+unzip network-globe_linux_amd64.zip
 ```
 
 #### macOS
 
 ```bash
-# TODO
+wget https://github.com/amozoss/network-globe/releases/latest/download/network-globe_darwin_arm.zip
+unzip network-globe_darwin_arm.zip
 ```
-
-### Build
-
-2. Install dependencies:
-
-   ```bash
-   go mod download
-   ```
 
 ## Usage
 
 1.  Give read permissions for pcap to read the network packets:
 
     ```bash
+    # for mac
     sudo chmod +r /dev/bpf*
     ```
 
@@ -74,6 +69,7 @@ sudo apt install libpcap-dev
 1.  Start network-globe:
 
     ```bash
+    # may need to run with sudo on ubuntu
     ./network-globe
     ```
 
@@ -120,7 +116,7 @@ go build
 ## Project Structure
 
 - `public/index.html`: HTML file for the Globe GL visualization and websocket connection.
-- `main.go`: packet sniffer written in Go using pcap library.
+- `main.go`: packet sniffer and IP to lat and lng lookup written in Go using pcap library and MaxMind.
 - `server.go`: Handles the packets, formats the message for the frontend, and broadcasts them to the client.
 
 ## Contributing
